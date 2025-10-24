@@ -104,12 +104,69 @@ with col1:
             if "No module named 'en_core_sci" in str(e):
                 st.warning("📦 The scientific NLP model is not installed. Run:\n```\npip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_lg-0.5.1.tar.gz\n```")
     
-    # Neo4j connection inputs (defaults may be overridden)
-    neo_uri = st.text_input("Neo4j URI", value="bolt://localhost:7687")
-    neo_user = st.text_input("Neo4j User", value="neo4j")
-    neo_pwd = st.text_input("Neo4j Password", type="password", value="password")
+    # Neo4j connection section
+    st.markdown("### Neo4j Connection")
     
-    # Add Neo4j connection test button
+    connection_type = st.radio(
+        "Connection Type",
+        ["Neo4j AuraDB (Cloud)", "Local Installation"],
+        help="Choose AuraDB for cloud-hosted database (recommended) or Local for Neo4j Desktop installation"
+    )
+    
+    if connection_type == "Neo4j AuraDB (Cloud)":
+        st.info("""
+        ℹ️ To use Neo4j AuraDB (Free tier):
+        1. Go to [Neo4j AuraDB Console](https://console.neo4j.io)
+        2. Sign up for free account
+        3. Create a new free database
+        4. Copy connection details from AuraDB console
+        """)
+        
+        # AuraDB connection inputs
+        neo_uri = st.text_input(
+            "Database URI", 
+            value="neo4j+s://xxxxxxxx.databases.neo4j.io",
+            help="Copy the connection URI from AuraDB console"
+        )
+        neo_user = st.text_input(
+            "Database User", 
+            value="neo4j",
+            help="Username from AuraDB console"
+        )
+        neo_pwd = st.text_input(
+            "Database Password", 
+            type="password", 
+            value="",
+            help="Copy the password from AuraDB console"
+        )
+    else:
+        st.info("""
+        ℹ️ For local Neo4j Desktop:
+        1. Install Neo4j Desktop
+        2. Create and start a database
+        3. Use local connection details
+        """)
+        
+        # Local connection inputs
+        neo_uri = st.text_input(
+            "Database URI", 
+            value="bolt://localhost:7687",
+            help="Usually 'bolt://localhost:7687' for local installations"
+        )
+        neo_user = st.text_input(
+            "Database User", 
+            value="neo4j",
+            help="Default is 'neo4j' for new installations"
+        )
+        neo_pwd = st.text_input(
+            "Database Password", 
+            type="password", 
+            value="",
+            help="The password you set during database creation"
+        )
+    
+    # Detailed connection status section
+    st.markdown("#### Connection Status")
     if st.button("🔌 Test Neo4j Connection"):
         try:
             with st.spinner("Testing connection..."):
@@ -118,10 +175,55 @@ with col1:
             st.success("✅ Successfully connected to Neo4j!")
         except Exception as e:
             st.error(f"❌ Failed to connect to Neo4j: {str(e)}")
+            
             if "Connection refused" in str(e):
-                st.warning("Make sure Neo4j is running and accessible at the specified URI.")
+                if connection_type == "Neo4j AuraDB (Cloud)":
+                    st.error("Unable to connect to AuraDB.")
+                    st.markdown("""
+                    **Troubleshooting Steps:**
+                    1. Verify the connection URI is correct
+                    2. Check if the database is active in AuraDB console
+                    3. Make sure you're using the correct URI format (neo4j+s://...)
+                    4. Verify your internet connection
+                    
+                    Need help? Go to the [AuraDB Quick Start Guide](https://neo4j.com/docs/aura/current/getting-started/overview/)
+                    """)
+                else:
+                    st.error("Connection refused. Local Neo4j instance not running.")
+                    st.markdown("""
+                    **Troubleshooting Steps:**
+                    1. Start Neo4j Desktop
+                    2. Check if your database is running
+                    3. Verify the connection URI (usually bolt://localhost:7687)
+                    4. Check if port 7687 is available
+                    """)
             elif "unauthorized" in str(e).lower():
-                st.warning("Check your username and password.")
+                if connection_type == "Neo4j AuraDB (Cloud)":
+                    st.error("Authentication failed. Check your AuraDB credentials.")
+                    st.markdown("""
+                    **Troubleshooting Steps:**
+                    1. Go to [AuraDB Console](https://console.neo4j.io)
+                    2. Open your database details
+                    3. Copy the exact username and password
+                    4. Make sure to use neo4j+s:// URI format
+                    """)
+                else:
+                    st.error("Authentication failed. Check your local Neo4j credentials.")
+                    st.markdown("""
+                    **Troubleshooting Steps:**
+                    1. Verify your username (default is 'neo4j')
+                    2. Make sure you're using the correct password
+                    3. Try resetting the password if needed
+                    """)
+            else:
+                st.error("Unexpected connection error.")
+                st.markdown("""
+                **General Troubleshooting:**
+                1. Verify your connection details
+                2. Check database status in console/desktop
+                3. Try copying credentials again
+                4. Check network connectivity
+                """)
     
     # Enable graph generation if text is preprocessed
     can_generate_graph = 'cleaned_text' in st.session_state and st.session_state.cleaned_text is not None
