@@ -299,12 +299,11 @@ with col1:
                     st.warning("⚠️ No relationship triples found in the text. The graph may be empty.")
                 gen_progress.progress(40)
 
-                gen_status.text("Normalizing entities and writing to Neo4j...")
-                graph = NeoGraph(uri=neo_uri, user=neo_user, pwd=neo_pwd)
+                # Store triples for display and saving
+                triple_data = []
                 inserted = 0
                 
-                # Store triples for display
-                triple_data = []
+                gen_status.text("Normalizing entities and storing relationships...")
                 
                 for i, t in enumerate(triples):
                     try:
@@ -324,8 +323,8 @@ with col1:
                         s_label = label_for(subj_norm)
                         o_label = label_for(obj_norm)
 
-                        # Store triple info for display
-                        triple_data.append({
+                        # Store triple info
+                        triple_info = {
                             "subject": subj_norm,
                             "subject_type": s_label,
                             "relation": t["relation"],
@@ -334,11 +333,16 @@ with col1:
                             "object_type": o_label,
                             "confidence": t["confidence"],
                             "sentence": t["sentence"]
-                        })
-
-                        graph.upsert_node(s_label, subj_norm, subj_cui)
-                        graph.upsert_node(o_label, obj_norm, obj_cui)
-                        graph.upsert_relation(s_label, subj_norm, o_label, obj_norm, t["relation"], t["dir"], t["confidence"], t["sentence"])
+                        }
+                        triple_data.append(triple_info)
+                        
+                        if storage_type == "Neo4j Database":
+                            graph = NeoGraph(uri=neo_uri, user=neo_user, pwd=neo_pwd)
+                            graph.upsert_node(s_label, subj_norm, subj_cui)
+                            graph.upsert_node(o_label, obj_norm, obj_cui)
+                            graph.upsert_relation(s_label, subj_norm, o_label, obj_norm, t["relation"], t["dir"], t["confidence"], t["sentence"])
+                            graph.close()
+                        
                         inserted += 1
                         if triples:
                             gen_progress.progress(40 + int(50 * (i + 1) / len(triples)))
@@ -347,9 +351,34 @@ with col1:
                         st.warning(f"⚠️ Skipped a triple due to error: {str(e)}")
                         continue
 
-                graph.close()
+                # Save to file if using local storage
+                if storage_type == "Local File":
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    if save_format == "JSON":
+                        output_file = os.path.join(save_path, f"relationships_{timestamp}.json")
+                        with open(output_file, 'w', encoding='utf-8') as f:
+                            json.dump({
+                                "metadata": {
+                                    "timestamp": timestamp,
+                                    "total_relationships": len(triple_data)
+                                },
+                                "relationships": triple_data
+                            }, f, indent=2, ensure_ascii=False)
+                    else:  # CSV
+                        output_file = os.path.join(save_path, f"relationships_{timestamp}.csv")
+                        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+                            writer = csv.DictWriter(f, fieldnames=[
+                                "subject", "subject_type", "relation", "direction",
+                                "object", "object_type", "confidence", "sentence"
+                            ])
+                            writer.writeheader()
+                            writer.writerows(triple_data)
+                    
+                    st.success(f"✅ Saved relationships to {output_file}")
+                else:
+                    gen_status.text(f"Done — inserted {inserted} triples into Neo4j.")
+                
                 gen_progress.progress(100)
-                gen_status.text(f"Done — inserted {inserted} triples into Neo4j.")
                 
                 if inserted > 0:
                     st.success("✅ Graph generated and written to Neo4j.")
