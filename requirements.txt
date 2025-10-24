@@ -1,0 +1,8 @@
+pdfplumber
+scispacy
+streamlit
+docx
+time
+re
+io
+en-core-sci-lg
