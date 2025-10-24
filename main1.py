@@ -107,11 +107,36 @@ with col1:
     # Neo4j connection section
     st.markdown("### Neo4j Connection")
     
-    connection_type = st.radio(
-        "Connection Type",
-        ["Neo4j AuraDB (Cloud)", "Local Installation"],
-        help="Choose AuraDB for cloud-hosted database (recommended) or Local for Neo4j Desktop installation"
+    storage_type = st.radio(
+        "Storage Type",
+        ["Local File", "Neo4j Database"],
+        help="Choose Local File to save data without requiring a database, or Neo4j Database for graph database storage"
     )
+    
+    if storage_type == "Local File":
+        st.info("""
+        ℹ️ Local File Storage:
+        - Saves graph data as JSON files
+        - No database required
+        - Easy to share and backup
+        - Suitable for testing and development
+        """)
+        save_format = st.selectbox(
+            "File Format",
+            ["JSON", "CSV"],
+            help="Choose the format to save the extracted relationships"
+        )
+        save_path = st.text_input(
+            "Save Directory",
+            value="./output",
+            help="Directory where files will be saved"
+        )
+    else:
+        connection_type = st.radio(
+            "Database Type",
+            ["Neo4j AuraDB (Cloud)", "Local Installation"],
+            help="Choose AuraDB for cloud-hosted database or Local for Neo4j Desktop installation"
+        )
     
     if connection_type == "Neo4j AuraDB (Cloud)":
         st.info("""
@@ -238,16 +263,6 @@ with col1:
                 st.error("⚠️ No text available for processing. Please upload and preprocess a document first.")
                 st.stop()
 
-            # Test Neo4j connection before starting
-            try:
-                with st.spinner("Testing Neo4j connection..."):
-                    graph = NeoGraph(uri=neo_uri, user=neo_user, pwd=neo_pwd)
-                    graph.close()
-            except Exception as e:
-                st.error(f"❌ Cannot connect to Neo4j: {str(e)}")
-                st.warning("Please check your Neo4j connection settings and try again.")
-                st.stop()
-
             # Progress UI
             gen_status = st.empty()
             gen_progress = st.progress(0)
@@ -257,6 +272,25 @@ with col1:
                 nlp = load_model()
                 matcher = build_matcher(nlp)
             gen_progress.progress(10)
+            
+            # Verify storage setup
+            if storage_type == "Neo4j Database":
+                try:
+                    with st.spinner("Testing Neo4j connection..."):
+                        graph = NeoGraph(uri=neo_uri, user=neo_user, pwd=neo_pwd)
+                        graph.close()
+                except Exception as e:
+                    st.error(f"❌ Cannot connect to Neo4j: {str(e)}")
+                    st.warning("Please check your Neo4j connection settings and try again.")
+                    st.stop()
+            else:
+                import os
+                import json
+                import csv
+                from datetime import datetime
+                
+                # Create output directory if it doesn't exist
+                os.makedirs(save_path, exist_ok=True)
 
             try:
                 gen_status.text("Extracting triples...")
