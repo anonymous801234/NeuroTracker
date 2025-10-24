@@ -7,6 +7,7 @@ from neo4j import GraphDatabase
 from tqdm import tqdm
 import re
 import functools
+import streamlit as st
 
 @functools.lru_cache(maxsize=1)
 def load_model():
@@ -26,6 +27,7 @@ def normalize_with_scispacy(text):
 
     return " ".join(cleaned_tokens), entities
 
+@st.cache_data
 def preprocess_text(text):
     cleaned_text, entities = normalize_with_scispacy(text)
     return cleaned_text, entities
@@ -50,7 +52,6 @@ def build_matcher(nlp):
     matcher.add("EXHIBITS", [pattern(["exhibit", "show", "display"])])
     return matcher
 
-
 # ---------------------------------------------------------------------
 # 3. Entity normalization via UMLS
 # ---------------------------------------------------------------------
@@ -65,42 +66,49 @@ def normalize_entity(nlp, text):
             return canonical, cui, score
     return text, None, None
 
-
-# ---------------------------------------------------------------------
-# 4. Extract triples from text
-# ---------------------------------------------------------------------
+def estimate_trait_intensity(sentence):
+    """Assigns an intensity score based on keywords."""
+    intensity_keywords = {
+        "strongly": 0.9,
+        "highly": 0.8,
+        "significantly": 0.7,
+        "moderately": 0.5,
+        "weakly": 0.3,
+        "slightly": 0.2
+    }
+    for word, score in intensity_keywords.items():
+        if word in sentence.lower():
+            return score
+    return 0.5  # default
 
 def extract_triples(nlp, matcher, text):
-    triples = []
-    text = " ".join(text.split())  # clean whitespace
     doc = nlp(text)
-    matches = matcher(doc)
+    triples = []
 
-    for match_id, token_ids in matches:
-        rel_type = nlp.vocab.strings[match_id]
+    for match_id, token_ids in matcher(doc):
         verb = doc[token_ids[0]]
-        subj = [t for t in doc[token_ids] if t.dep_ in ["nsubj", "nsubjpass"]]
-        obj = [t for t in doc[token_ids] if t.dep_ in ["dobj", "pobj"]]
+        subj = doc[token_ids[1]]
+        obj = doc[token_ids[2]]
 
-        if subj and obj:
-            subj_text = subj[0].text
-            obj_text = obj[0].text
+        relation = doc.vocab.strings[match_id]
+        confidence = 0.8  
+        intensity = estimate_trait_intensity(text)
+        condition = "baseline"  
 
-            # Negation detection
-            dir_sign = "+"
-            if any(tok.dep_ == "neg" for tok in verb.children):
-                dir_sign = "-"
+        triples.append({
+            "subject": subj.text,
+            "subject_type": "TRAIT",  
+            "relation": relation,
+            "object": obj.text,
+            "object_type": "NEURAL_PATTERN",  
+            "confidence": confidence,
+            "condition": condition,
+            "intensity": intensity,
+            "sentence": text,
+            "dir": "+"
+        })
 
-            triples.append({
-                "subject": subj_text,
-                "relation": rel_type,
-                "object": obj_text,
-                "dir": dir_sign,
-                "sentence": doc.text,
-                "confidence": 0.8
-            })
     return triples
-
 
 # ---------------------------------------------------------------------
 # 5. Neo4j connector and upsert functions
@@ -139,11 +147,15 @@ class NeoGraph:
               (b:{end_label} {{name:$e_name}})
         MERGE (a)-[r:{rel_type}]->(b)
         ON CREATE SET r.dir=$dir, r.conf=$conf, r.example=$sent
-        ON MATCH SET r.conf = CASE WHEN r.conf<$conf THEN $conf ELSE r.conf END
+        ON MATCH SET r.conf = CASE
+            WHEN r.conf IS NULL THEN $conf
+            WHEN r.conf < $conf THEN $conf
+            ELSE r.conf
+        END
         """
         with self.driver.session() as s:
             s.run(cypher, s_name=start_name, e_name=end_name,
                   dir=dir_sign, conf=conf, sent=sent)
+
     def close(self):
         self.driver.close()
-

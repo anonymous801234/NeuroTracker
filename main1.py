@@ -1,24 +1,81 @@
+import pandas as pd
 import streamlit as st
-try:
-    from streamlit_extras.colored_header import colored_header
-except Exception:
-    # Fallback simple implementation to avoid ImportError if the package is missing
-    def colored_header(title, description="", color_name="blue"):
-        color_map = {
-            "violet-70": "#A78BFA",
-            "blue": "#4C9AFF",
-            "green": "#34D399"
-        }
-        color = color_map.get(color_name, color_name)
-        st.markdown(f"<h2 style='color:{color}; margin:0'>{title}</h2>", unsafe_allow_html=True)
-        if description:
-            st.markdown(f"<p style='color:gray; margin-top:0'>{description}</p>", unsafe_allow_html=True)
-
 from preprocessor import preprocess_text, load_model, build_matcher, extract_triples, normalize_entity, NeoGraph
 import pdfplumber
 from docx import Document
 import time
-import streamlit as st
+from graphGenerator import visualize_graph
+
+
+# Cache the NLP model to avoid reloading
+@st.cache_resource
+def get_cached_nlp():
+    return load_model()
+
+st.title("🧠 Cyber Cortex — Neural Structure Graph Lab")
+st.write("Analyze how **traits**, **environment**, and **neural patterns** co-modulate the brain's functional architecture.")
+
+cyber_cortex_css = """
+<style>
+body {
+    background-color: #0A0E14;
+    color: #E6F1FF;
+}
+section.main > div {
+    background-color: #0A0E14 !important;
+}
+.stApp {
+    background: #0A0E14;
+}
+div.block-container {
+    padding-top: 2rem;
+}
+.sidebar .sidebar-content {
+    background: #05070A !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #00F6FF !important;
+}
+.stButton > Button {
+    background: linear-gradient(90deg,blue,#A78BFA);
+    border:none;
+    color:white !important;
+    padding:0.6rem 1.3rem;
+    border-radius:8px;
+    font-weight:30px;
+    transition:0.3s;
+}
+.stButton{
+font-weight:200px !important;}
+
+.stButton>button:hover {
+    box-shadow:10 0 0px lightblue;
+    transform:scale(1.05);
+}
+.st-emotion-cache-1j90q2q et2rgd20{
+font-weight:200px !important;}
+.uploadedFile {
+    border-radius: 6px;
+}
+
+.dataframe {
+    background:#0F141A;
+    color:white;
+}
+
+</style>
+"""
+
+def neural_loader(stage_label, progress):
+    st.markdown(f"""
+    <div style="font-size:18px; color:#00F6FF; margin-top:15px;">
+        ⚡ {stage_label}
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.progress(progress)
+    time.sleep(0.4)
 
 def extract_text_from_file(uploaded_file):
     if uploaded_file.type == "text/plain":
@@ -29,21 +86,12 @@ def extract_text_from_file(uploaded_file):
             for page in pdf.pages:
                 text += page.extract_text()
             return text
-    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        doc = Document(uploaded_file)
-        text = ""
-        for para in doc.paragraphs:
-            text += para.text + "\n"
-        return text
     else:
         return ""
 
 st.set_page_config(page_title="NeuroTrait Graph", layout="wide")
 
-# --- HEADER ---
-colored_header("🧠 NeuroTrait Knowledge Graph Generator", 
-               description="Explore how human traits, environments, and neural patterns interconnect.",
-               color_name="violet-70")
+st.markdown(cyber_cortex_css, unsafe_allow_html=True)
 
 # --- LAYOUT COLUMNS ---
 col1, col2, col3 = st.columns([1, 2, 2])
@@ -53,7 +101,7 @@ with col1:
     st.subheader("Upload Document")
     uploaded_file = st.file_uploader("Choose a file", type=["txt", "pdf", "docx"])
     uploaded_file_doc = uploaded_file.name.lower().endswith(('.docx', '.pdf', '.txt')) if uploaded_file is not None else False
-    
+
     # Extract text as soon as file is uploaded
     if uploaded_file is not None:
         try:
@@ -67,31 +115,38 @@ with col1:
         except Exception as e:
             st.error(f"⚠️ Error extracting text: {str(e)}")
             st.session_state.raw_text = None
-    
-    st.markdown("### Actions")
+    else:
+        # Reset raw text and related session states when file is removed
+        st.session_state.raw_text = None
+        if 'cleaned_text' in st.session_state:
+            del st.session_state.cleaned_text
+        if 'entities' in st.session_state:
+            del st.session_state.entities
+        if 'graph_generated' in st.session_state:
+            del st.session_state.graph_generated
 
-    # Function moved to top of file
+    st.markdown("### Actions")
 
     # Add preprocess button
     preprocess_btn = st.button("🔧 Preprocess", disabled=not (uploaded_file_doc and 'raw_text' in st.session_state))
-    
+
     # Run preprocessing when button is clicked
     if preprocess_btn and 'raw_text' in st.session_state:
         # Create per-run progress UI elements
         progress_text = st.empty()
         progress_bar = st.progress(0)
-        
+
         progress_text.text("🔄 Loading NLP model...")
         try:
             with st.spinner("Loading NLP model and preprocessing..."):
-                nlp = load_model()
+                nlp = get_cached_nlp()  # Use cached model
                 progress_bar.progress(30)
-                
+
                 # Run preprocessing on the extracted text
                 progress_text.text("🔄 Analyzing text...")
                 cleaned_text, entities = preprocess_text(st.session_state.raw_text)
                 progress_bar.progress(90)
-                
+
                 # Store results
                 st.session_state.cleaned_text = cleaned_text
                 st.session_state.entities = entities
@@ -103,16 +158,16 @@ with col1:
             st.error(f"⚠️ Error during preprocessing: {str(e)}")
             if "No module named 'en_core_sci" in str(e):
                 st.warning("📦 The scientific NLP model is not installed. Run:\n```\npip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_lg-0.5.1.tar.gz\n```")
-    
+
     # Neo4j connection section
     st.markdown("### Neo4j Connection")
-    
+
     storage_type = st.radio(
         "Storage Type",
         ["Local File", "Neo4j Database"],
         help="Choose Local File to save data without requiring a database, or Neo4j Database for graph database storage"
     )
-    
+
     # Initialize variables with defaults
     save_format = "JSON"
     save_path = "./output"
@@ -120,7 +175,7 @@ with col1:
     neo_uri = "bolt://localhost:7687"
     neo_user = "neo4j"
     neo_pwd = ""
-    
+
     # Show appropriate options based on storage type
     if storage_type == "Local File":
         st.info("""
@@ -146,7 +201,7 @@ with col1:
             ["Neo4j AuraDB (Cloud)", "Local Installation"],
             help="Choose AuraDB for cloud-hosted database or Local for Neo4j Desktop installation"
         )
-    
+
     if connection_type == "Neo4j AuraDB (Cloud)":
         st.info("""
         ℹ️ To use Neo4j AuraDB (Free tier):
@@ -155,21 +210,21 @@ with col1:
         3. Create a new free database
         4. Copy connection details from AuraDB console
         """)
-        
+
         # AuraDB connection inputs
         neo_uri = st.text_input(
-            "Database URI", 
+            "Database URI",
             value="neo4j+s://xxxxxxxx.databases.neo4j.io",
             help="Copy the connection URI from AuraDB console"
         )
         neo_user = st.text_input(
-            "Database User", 
+            "Database User",
             value="neo4j",
             help="Username from AuraDB console"
         )
         neo_pwd = st.text_input(
-            "Database Password", 
-            type="password", 
+            "Database Password",
+            type="password",
             value="",
             help="Copy the password from AuraDB console"
         )
@@ -180,25 +235,25 @@ with col1:
         2. Create and start a database
         3. Use local connection details
         """)
-        
+
         # Local connection inputs
         neo_uri = st.text_input(
-            "Database URI", 
+            "Database URI",
             value="bolt://localhost:7687",
             help="Usually 'bolt://localhost:7687' for local installations"
         )
         neo_user = st.text_input(
-            "Database User", 
+            "Database User",
             value="neo4j",
             help="Default is 'neo4j' for new installations"
         )
         neo_pwd = st.text_input(
-            "Database Password", 
-            type="password", 
+            "Database Password",
+            type="password",
             value="",
             help="The password you set during database creation"
         )
-    
+
     # Detailed connection status section
     st.markdown("#### Connection Status")
     if st.button("🔌 Test Neo4j Connection"):
@@ -209,7 +264,7 @@ with col1:
             st.success("✅ Successfully connected to Neo4j!")
         except Exception as e:
             st.error(f"❌ Failed to connect to Neo4j: {str(e)}")
-            
+
             if "Connection refused" in str(e):
                 if storage_type == "Neo4j Database" and connection_type == "Neo4j AuraDB (Cloud)":
                     st.error("Unable to connect to AuraDB.")
@@ -219,7 +274,7 @@ with col1:
                     2. Check if the database is active in AuraDB console
                     3. Make sure you're using the correct URI format (neo4j+s://...)
                     4. Verify your internet connection
-                    
+
                     Need help? Go to the [AuraDB Quick Start Guide](https://neo4j.com/docs/aura/current/getting-started/overview/)
                     """)
                 else:
@@ -258,13 +313,13 @@ with col1:
                 3. Try copying credentials again
                 4. Check network connectivity
                 """)
-    
+
     # Enable graph generation if text is preprocessed
     can_generate_graph = 'cleaned_text' in st.session_state and st.session_state.cleaned_text is not None
-            
+
     # Enable graph generation if text is preprocessed
     graph_btn = st.button("🕸️ Generate Graph", disabled=not can_generate_graph)
-    
+
     if graph_btn:
             # Ensure we have the raw text (from preprocessing or freshly extracted)
             raw = st.session_state.get("raw_text")
@@ -278,10 +333,10 @@ with col1:
 
             gen_status.text("Loading model and matcher...")
             with st.spinner("Loading NLP model and building matcher..."):
-                nlp = load_model()
+                nlp = get_cached_nlp()  # Use cached model
                 matcher = build_matcher(nlp)
             gen_progress.progress(10)
-            
+
             # Verify storage setup
             if storage_type == "Neo4j Database":
                 try:
@@ -297,7 +352,7 @@ with col1:
                 import json
                 import csv
                 from datetime import datetime
-                
+
                 # Create output directory if it doesn't exist
                 os.makedirs(save_path, exist_ok=True)
 
@@ -311,9 +366,12 @@ with col1:
                 # Store triples for display and saving
                 triple_data = []
                 inserted = 0
-                
+
+                # Store triples in session state for evaluation
+                st.session_state.triples = triples
+
                 gen_status.text("Normalizing entities and storing relationships...")
-                
+
                 for i, t in enumerate(triples):
                     try:
                         subj_norm, subj_cui, _ = normalize_entity(nlp, t["subject"])
@@ -344,18 +402,18 @@ with col1:
                             "sentence": t["sentence"]
                         }
                         triple_data.append(triple_info)
-                        
+
                         if storage_type == "Neo4j Database":
                             graph = NeoGraph(uri=neo_uri, user=neo_user, pwd=neo_pwd)
                             graph.upsert_node(s_label, subj_norm, subj_cui)
                             graph.upsert_node(o_label, obj_norm, obj_cui)
                             graph.upsert_relation(s_label, subj_norm, o_label, obj_norm, t["relation"], t["dir"], t["confidence"], t["sentence"])
                             graph.close()
-                        
+
                         inserted += 1
                         if triples:
                             gen_progress.progress(40 + int(50 * (i + 1) / len(triples)))
-                    
+
                     except Exception as e:
                         st.warning(f"⚠️ Skipped a triple due to error: {str(e)}")
                         continue
@@ -382,31 +440,33 @@ with col1:
                             ])
                             writer.writeheader()
                             writer.writerows(triple_data)
-                    
+
                     st.success(f"✅ Saved relationships to {output_file}")
                 else:
                     gen_status.text(f"Done — inserted {inserted} triples into Neo4j.")
-                
+                    st.session_state.graph_generated = True
+                    st.session_state.neo_uri = neo_uri
+                    st.session_state.neo_user = neo_user
+                    st.session_state.neo_pwd = neo_pwd
+
                 gen_progress.progress(100)
-                
+
                 if inserted > 0:
                     st.success("✅ Graph generated and written to Neo4j.")
-                    
+
                     # Display extracted triples in a nice format
                     st.subheader("📊 Extracted Relationships")
                     for t in triple_data:
                         st.markdown(f"""
-                        **{t['subject']}** ({t['subject_type']}) 
-                        → *{t['relation']}* ({t['direction']}) → 
+                        **{t['subject']}** ({t['subject_type']})
+                        → *{t['relation']}* ({t['direction']}) →
                         **{t['object']}** ({t['object_type']})
-                        
+
                         Confidence: {t['confidence']:.2f}
                         Context: _{t['sentence']}_
                         ---
                         """)
-                else:
-                    st.warning("⚠️ No relationships were written to the graph. Check if the text contains relevant patterns.")
-                    
+
             except Exception as e:
                 st.error(f"❌ Error during graph generation: {str(e)}")
                 gen_status.text("Failed to generate graph.")
@@ -415,28 +475,38 @@ with col1:
 with col2:
     st.subheader("Processed Text")
     st.info("Preview will appear here after preprocessing.")
-    st.markdown("**Trait:** <span style='color: #4C9AFF'>Blue</span>  |  "
-                "**Environment:** <span style='color: #34D399'>Green</span>  |  "
-                "**Neural Pattern:** <span style='color: #A78BFA'>Violet</span>", unsafe_allow_html=True)
-    
+
     # Show raw text immediately after upload
     raw_preview = None
     if 'raw_text' in st.session_state and st.session_state.raw_text:
-        raw_preview = st.text_area("Extracted Text", value=st.session_state.raw_text, height=200)
-    
+        raw_preview = st.text_area("Extracted Text", value=st.session_state.raw_text, height=200, disabled=True)
+
     # Show preprocessed text when available
     if 'cleaned_text' in st.session_state:
         st.success("✅ Preprocessing Complete!")
-        st.text_area("Cleaned and Annotated Text", value=st.session_state.cleaned_text, height=500)
+        st.text_area("Cleaned and Annotated Text", value=st.session_state.cleaned_text, height=500,disabled=True)
         if 'entities' in st.session_state and st.session_state.entities:
             st.subheader("Detected Entities")
             st.write(st.session_state.entities)
     elif not raw_preview:  # Only show placeholder if no raw text
-        st.text_area("Cleaned and Annotated Text", placeholder="Waiting for input...", height=500)
+        st.text_area("Cleaned and Annotated Text", placeholder="Waiting for input...", height=500,disabled=True)
 
 
 # --- RIGHT PANEL: GRAPH AREA ---
 with col3:
     st.subheader("Knowledge Graph View")
     st.info("Interactive graph will appear here.")
-    st.empty()  
+    graph_placeholder = st.empty()
+
+    # Clear the graph placeholder to remove any previous graph display
+    graph_placeholder.empty()
+
+    # Display graph if available
+    if 'graph_generated' in st.session_state and st.session_state.graph_generated:
+        try:
+            with graph_placeholder.container():
+                visualize_graph(st.session_state.neo_uri, st.session_state.neo_user, st.session_state.neo_pwd)
+        except Exception as e:
+            st.error(f"Error displaying graph: {str(e)}")
+
+
