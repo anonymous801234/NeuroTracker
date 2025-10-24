@@ -112,14 +112,21 @@ class NeoGraph:
         self._create_schema()
 
     def _create_schema(self):
+        # Neo4j now requires exactly one statement per run() call. Split
+        # the schema DDL into individual statements and run them separately.
         schema = """
         CREATE CONSTRAINT IF NOT EXISTS FOR (t:TRAIT) REQUIRE t.name IS UNIQUE;
         CREATE CONSTRAINT IF NOT EXISTS FOR (e:ENVIRONMENT) REQUIRE e.name IS UNIQUE;
         CREATE CONSTRAINT IF NOT EXISTS FOR (r:NEURAL_REGION) REQUIRE r.name IS UNIQUE;
         CREATE CONSTRAINT IF NOT EXISTS FOR (p:NEURAL_PATTERN) REQUIRE p.name IS UNIQUE;
         """
+        statements = [s.strip() for s in schema.split(";")]
         with self.driver.session() as s:
-            s.run(schema)
+            for stmt in statements:
+                if stmt:
+                    # run one statement at a time to avoid the "Expected exactly
+                    # one statement per query" error from Neo4j
+                    s.run(stmt)
 
     def upsert_node(self, label, name, cui):
         with self.driver.session() as s:

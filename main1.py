@@ -113,6 +113,15 @@ with col1:
         help="Choose Local File to save data without requiring a database, or Neo4j Database for graph database storage"
     )
     
+    # Initialize variables with defaults
+    save_format = "JSON"
+    save_path = "./output"
+    connection_type = "Local Installation"
+    neo_uri = "bolt://localhost:7687"
+    neo_user = "neo4j"
+    neo_pwd = ""
+    
+    # Show appropriate options based on storage type
     if storage_type == "Local File":
         st.info("""
         ℹ️ Local File Storage:
@@ -202,7 +211,7 @@ with col1:
             st.error(f"❌ Failed to connect to Neo4j: {str(e)}")
             
             if "Connection refused" in str(e):
-                if connection_type == "Neo4j AuraDB (Cloud)":
+                if storage_type == "Neo4j Database" and connection_type == "Neo4j AuraDB (Cloud)":
                     st.error("Unable to connect to AuraDB.")
                     st.markdown("""
                     **Troubleshooting Steps:**
