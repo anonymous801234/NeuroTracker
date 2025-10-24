@@ -11,7 +11,7 @@ import time
 import networkx as nx
 import matplotlib.pyplot as plt
 from neo4j import GraphDatabase
-from neurograph_pipeline import load_scispacy_model, build_matcher, extract_triples, normalize_entity, NeoGraph
+from neurograph_pipeline import load_model, build_matcher, extract_triples, normalize_entity, NeoGraph
 
 
 # --------------------------------------------------------------------
@@ -81,7 +81,7 @@ if st.button("🚀 Generate Knowledge Graph"):
 
     # Stage 1: Load model
     progress_text.text(steps[0][0])
-    nlp = load_scispacy_model()
+    nlp = load_model()
     matcher = build_matcher(nlp)
     time.sleep(1)
     progress_bar.progress(steps[0][1])
